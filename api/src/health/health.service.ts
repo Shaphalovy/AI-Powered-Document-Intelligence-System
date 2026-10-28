@@ -28,7 +28,7 @@ export class HealthService implements OnModuleDestroy {
     connectionTimeoutMillis: TIMEOUT_MS,
     max: 2,
   });
-
+  private readonly processorUrl = requireEnv('PROCESSOR_URL');
   private readonly redis = new Redis(requireEnv('REDIS_URL'), {
     lazyConnect: true,
     maxRetriesPerRequest: 1,
@@ -59,7 +59,16 @@ export class HealthService implements OnModuleDestroy {
       return false;
     }
   }
-
+  async checkProcessor(): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.processorUrl}/health`, {
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
   async onModuleDestroy(): Promise<void> {
     await this.pool.end();
     this.redis.disconnect();

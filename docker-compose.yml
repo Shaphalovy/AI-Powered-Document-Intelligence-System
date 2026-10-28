@@ -28,6 +28,18 @@ services:
     ports:
       - "127.0.0.1:6380:6379"
 
+  processor:
+    build: ./processor
+    volumes:
+      - ./processor:/app
+    expose:
+      - "8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build: ./api
     env_file: .env
@@ -35,6 +47,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      processor:
         condition: service_healthy
     volumes:
       - ./api:/app

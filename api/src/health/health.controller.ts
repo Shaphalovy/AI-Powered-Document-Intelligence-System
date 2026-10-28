@@ -6,14 +6,15 @@ import { HealthService } from './health.service';
 export class HealthController {
   constructor(private readonly health: HealthService) {}
 
-  @Get()
+   @Get()
   async check(@Res({ passthrough: true }) res: Response) {
-    const [db, redis] = await Promise.all([
+    const [db, redis, processor] = await Promise.all([
       this.health.checkDb(),
       this.health.checkRedis(),
+      this.health.checkProcessor(),
     ]);
-    const healthy = db && redis;
+    const healthy = db && redis && processor;
     res.status(healthy ? 200 : 503);
-    return { status: healthy ? 'ok' : 'degraded', db, redis };
+    return { status: healthy ? 'ok' : 'degraded', db, redis, processor };
   }
 }
