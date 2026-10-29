@@ -126,8 +126,8 @@ Planned: POST /documents (multi-file upload, Step 5B), document list/status, ext
 No secrets in git; validate uploads (magic bytes, size, limits); JWT + roles; AI output is untrusted until validated; queue payload IDs only; processor not exposed; free LLM tiers may send data to third parties, so only synthetic/public documents are used, and this is stated openly in the README; encrypted storage of LLM API keys; audit trail for corrections.
 Known auth limits: JWT is stateless, no logout/revocation, short expiry instead; no refresh tokens; rate limit is in-memory per instance per IP (revisit behind a proxy/when scaling); no account lockout; where the frontend stores the token is decided in the UI steps.
 Multer advisory (VERIFIED 2026-10-29 from the GitHub advisory GHSA-q7qp-rjg7-q26m, CVE-2026-113872): high severity DoS (CVSS 7.5). If a request is aborted while an ASYNC fileFilter is still pending, the process can crash; one unauthenticated request is enough. Affected: multer >= 2.0.0 and < 2.5.0. Patched: 2.5.0. Workaround: use a synchronous fileFilter (or none).
-Installed (verified by owner, `npm ls multer`): @nestjs/platform-express 11.2.8 -> multer 2.4.0 = VULNERABLE. `npm audit --omit=dev` reports 2 high (multer and @nestjs/platform-express that depends on it), fix "available" via npm audit fix (not yet applied).
-Rules until fixed: never use an async fileFilter; validate file content AFTER saving (magic bytes), not inside multer. Planned fix (Step 5A-fix): force multer 2.5.0 with an npm `overrides` entry in api/package.json, then re-run `npm ls multer`, `npm audit --omit=dev`, tests and build. Not yet verified that 2.5.0 works with platform-express 11.2.8.
+FIXED 2026-10-29 (Step 5A-fix): platform-express 11.2.8 pins multer exactly 2.4.0 (vulnerable), and the audit lists platform-express up to 12.2.0 as affected, so upgrading platform-express does not help. Fix = `overrides` in api/package.json forcing multer 2.5.0. Verified: `npm ls multer` shows 2.5.0 overridden, `npm audit --omit=dev` = 0 vulnerabilities, 42 tests pass, build passes. Re-check `npm audit` whenever platform-express is upgraded; remove the override only when platform-express itself depends on multer >= 2.5.0.
+Upload rule kept as defense in depth: never use an async fileFilter; validate file content AFTER saving (magic bytes), not inside multer. Not yet verified: upload behaviour with multer 2.5.0 under real requests (done in Step 5B).
 Earlier note: the full `npm audit` (including dev dependencies) reported 10 vulnerabilities (8 low, 2 high) in Step 1/4; the low ones are not yet inspected.
 
 ## 11. Decisions and research log
@@ -151,7 +151,7 @@ Earlier note: the full `npm audit` (including dev dependencies) reported 10 vuln
 | 4A | TypeORM wiring, User entity, scrypt hashing, admin seed | DONE | All TC passed (2026-10-29) |
 | 4B | JWT login, guards, roles, rate limit, helmet, validation | DONE | All TC passed (2026-10-29): 20 API tests, 401 without token, admin-ping 200 for admin and 403 for user, wrong/unknown email both 401, invalid body 400, rate limit returns 429, no X-Powered-By |
 | 5A | Multer version check + file type detector (magic bytes) + tests | DONE | Owner ran on 2026-10-29: `npm test` = 5 suites, 42 tests passed (2.8 s); `npm run build` succeeded with no errors; commit 65c9db4 pushed. `npm ls multer` = 2.4.0 (vulnerable, see section 10) |
-| 5A-fix | Upgrade multer to >= 2.5.0 (npm overrides) + re-check audit/tests/build | IN PROGRESS | Advisory verified; fix not yet applied |
+| 5A-fix | Upgrade multer to >= 2.5.0 (npm overrides) + re-check audit/tests/build | DONE (owner must commit api/package.json + api/package-lock.json) | Owner ran 2026-10-29: `npm view multer@2.5.0` = 2.5.0 exists; platform-express 11.2.8 pins multer exactly 2.4.0; added `"overrides": {"multer": "2.5.0"}`; `npm ls multer` = 2.5.0 overridden; `npm audit --omit=dev` = 0 vulnerabilities; `npm test` = 42 passed; `npm run build` OK |
 | 5B | Upload endpoint (multi-file, disk storage, shared uploads volume, documents rows) | TODO | |
 | 6 | BullMQ pipeline (retry, idempotency, status, reprocess) | TODO | |
 | 7 | Digital PDF + OCR | TODO | |
@@ -169,7 +169,7 @@ Earlier note: the full `npm audit` (including dev dependencies) reported 10 vuln
 | 22 | Security + performance pass, pin all package versions, auto-run migrations, deployment | TODO | |
 | 23 | README, diagram, schema, prompts, AI disclosure, video | TODO | |
 
-Current test status: API 42 tests passing in 5 suites (as of Step 5A, run by owner 2026-10-29), processor 1 passing (as of Step 4B, not re-run since). API build passes.
+Current test status: API 42 tests passing in 5 suites (as of Step 5A-fix, run by owner 2026-10-29, after the multer override), processor 1 passing (as of Step 4B, not re-run since). API build passes.
 
 ## 13. Known issues and todo
 - Migrations are NOT run automatically. A fresh clone + `docker compose up` crashes when the API needs the users table. Must be automated before delivery (Step 22/23).
@@ -183,4 +183,4 @@ Current test status: API 42 tests passing in 5 suites (as of Step 5A, run by own
 - Tests must never use real confidential invoices.
 
 ## 14. Next action
-Step 5A-fix: force multer to 2.5.0 via `overrides` in api/package.json (check first that 2.5.0 exists on npm and what range @nestjs/platform-express 11.2.8 declares), rebuild the api container, then re-run `npm ls multer`, `npm audit --omit=dev`, `npm test`, `npm run build`. Then Step 5B (upload endpoint: multi-file, disk storage, NO async fileFilter, magic-byte check after save, random UUID stored name, documents rows).
+Owner: `git pull`, then commit and push api/package.json and api/package-lock.json (multer override). Then Step 5B (upload endpoint: multi-file, disk storage, NO async fileFilter, magic-byte check after save, random UUID stored name, documents rows).
