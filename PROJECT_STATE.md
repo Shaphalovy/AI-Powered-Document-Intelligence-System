@@ -85,7 +85,7 @@ docintel/
     src/users/              user.entity, password.service(+spec), users.service, admin-seed.service, users.module   (Step 4A, DONE)
     src/auth/               auth.config, auth.types, auth.service, auth.controller, auth.module, jwt-auth.guard(+spec),
                             roles.guard(+spec), public.decorator, roles.decorator, dto/login.dto   (Step 4B, DONE)
-    src/documents/          (Step 5A, code given, not yet run) file-type.detector(+spec)
+    src/documents/          (Step 5A, DONE) file-type.detector(+spec)
   processor/                FastAPI
     app/main.py             GET /health
     tests/test_health.py
@@ -125,7 +125,10 @@ Planned: POST /documents (multi-file upload, Step 5B), document list/status, ext
 ## 10. Security rules
 No secrets in git; validate uploads (magic bytes, size, limits); JWT + roles; AI output is untrusted until validated; queue payload IDs only; processor not exposed; free LLM tiers may send data to third parties, so only synthetic/public documents are used, and this is stated openly in the README; encrypted storage of LLM API keys; audit trail for corrections.
 Known auth limits: JWT is stateless, no logout/revocation, short expiry instead; no refresh tokens; rate limit is in-memory per instance per IP (revisit behind a proxy/when scaling); no account lockout; where the frontend stores the token is decided in the UI steps.
-Multer advisories (Express security releases page, plus aggregator pages for 2.1.x): DoS issues fixed in multer 2.0.1, 2.0.2, and aggregator pages list further fixes in 2.1.0 and 2.1.1. The multer version actually installed via @nestjs/platform-express must be checked (`npm ls multer`) and forced to >= 2.1.1 if lower. npm audit currently reports 10 vulnerabilities (8 low, 2 high); contents not yet inspected.
+Multer advisory (VERIFIED 2026-10-29 from the GitHub advisory GHSA-q7qp-rjg7-q26m, CVE-2026-113872): high severity DoS (CVSS 7.5). If a request is aborted while an ASYNC fileFilter is still pending, the process can crash; one unauthenticated request is enough. Affected: multer >= 2.0.0 and < 2.5.0. Patched: 2.5.0. Workaround: use a synchronous fileFilter (or none).
+Installed (verified by owner, `npm ls multer`): @nestjs/platform-express 11.2.8 -> multer 2.4.0 = VULNERABLE. `npm audit --omit=dev` reports 2 high (multer and @nestjs/platform-express that depends on it), fix "available" via npm audit fix (not yet applied).
+Rules until fixed: never use an async fileFilter; validate file content AFTER saving (magic bytes), not inside multer. Planned fix (Step 5A-fix): force multer 2.5.0 with an npm `overrides` entry in api/package.json, then re-run `npm ls multer`, `npm audit --omit=dev`, tests and build. Not yet verified that 2.5.0 works with platform-express 11.2.8.
+Earlier note: the full `npm audit` (including dev dependencies) reported 10 vulnerabilities (8 low, 2 high) in Step 1/4; the low ones are not yet inspected.
 
 ## 11. Decisions and research log
 - Docker is used on purpose: the system needs Postgres with pgvector, Redis, and Python with Tesseract; Docker makes it reproducible for interviewers (`docker compose up`) and easier to deploy. Not required by the assignment. Trade-off: slower dev loop and Windows quirks (ports, bind mounts).
@@ -147,7 +150,8 @@ Multer advisories (Express security releases page, plus aggregator pages for 2.1
 | 3 | DB schema + TypeORM migrations | DONE | All TC passed (2026-10-29) |
 | 4A | TypeORM wiring, User entity, scrypt hashing, admin seed | DONE | All TC passed (2026-10-29) |
 | 4B | JWT login, guards, roles, rate limit, helmet, validation | DONE | All TC passed (2026-10-29): 20 API tests, 401 without token, admin-ping 200 for admin and 403 for user, wrong/unknown email both 401, invalid body 400, rate limit returns 429, no X-Powered-By |
-| 5A | Multer version check + file type detector (magic bytes) + tests | IN PROGRESS | Code given, NOT yet run. Expected after run: 42 API tests passing |
+| 5A | Multer version check + file type detector (magic bytes) + tests | DONE | Owner ran on 2026-10-29: `npm test` = 5 suites, 42 tests passed (2.8 s); `npm run build` succeeded with no errors; commit 65c9db4 pushed. `npm ls multer` = 2.4.0 (vulnerable, see section 10) |
+| 5A-fix | Upgrade multer to >= 2.5.0 (npm overrides) + re-check audit/tests/build | IN PROGRESS | Advisory verified; fix not yet applied |
 | 5B | Upload endpoint (multi-file, disk storage, shared uploads volume, documents rows) | TODO | |
 | 6 | BullMQ pipeline (retry, idempotency, status, reprocess) | TODO | |
 | 7 | Digital PDF + OCR | TODO | |
@@ -165,7 +169,7 @@ Multer advisories (Express security releases page, plus aggregator pages for 2.1
 | 22 | Security + performance pass, pin all package versions, auto-run migrations, deployment | TODO | |
 | 23 | README, diagram, schema, prompts, AI disclosure, video | TODO | |
 
-Current test status: API 20 tests passing, processor 1 passing (as of Step 4B).
+Current test status: API 42 tests passing in 5 suites (as of Step 5A, run by owner 2026-10-29), processor 1 passing (as of Step 4B, not re-run since). API build passes.
 
 ## 13. Known issues and todo
 - Migrations are NOT run automatically. A fresh clone + `docker compose up` crashes when the API needs the users table. Must be automated before delivery (Step 22/23).
@@ -179,4 +183,4 @@ Current test status: API 20 tests passing, processor 1 passing (as of Step 4B).
 - Tests must never use real confidential invoices.
 
 ## 14. Next action
-Step 5A: run `npm ls multer` and `npm audit --omit=dev`, send the output; add file-type.detector.ts and its spec; run tests. Then Step 5B (upload endpoint).
+Step 5A-fix: force multer to 2.5.0 via `overrides` in api/package.json (check first that 2.5.0 exists on npm and what range @nestjs/platform-express 11.2.8 declares), rebuild the api container, then re-run `npm ls multer`, `npm audit --omit=dev`, `npm test`, `npm run build`. Then Step 5B (upload endpoint: multi-file, disk storage, NO async fileFilter, magic-byte check after save, random UUID stored name, documents rows).
