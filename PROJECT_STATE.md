@@ -85,7 +85,7 @@ docintel/
     src/users/              user.entity, password.service(+spec), users.service, admin-seed.service, users.module   (Step 4A, DONE)
     src/auth/               auth.config, auth.types, auth.service, auth.controller, auth.module, jwt-auth.guard(+spec),
                             roles.guard(+spec), public.decorator, roles.decorator, dto/login.dto   (Step 4B, DONE)
-    src/documents/          file-type.detector(+spec) (5A, DONE); document.entity, upload.config(+spec) (5B-1, code written, owner must verify)
+    src/documents/          file-type.detector(+spec) (5A, DONE); document.entity, upload.config(+spec) (5B-1, DONE)
   processor/                FastAPI
     app/main.py             GET /health
     tests/test_health.py
@@ -153,7 +153,7 @@ Earlier note: the full `npm audit` (including dev dependencies) reported 10 vuln
 | 4B | JWT login, guards, roles, rate limit, helmet, validation | DONE | All TC passed (2026-10-29): 20 API tests, 401 without token, admin-ping 200 for admin and 403 for user, wrong/unknown email both 401, invalid body 400, rate limit returns 429, no X-Powered-By |
 | 5A | Multer version check + file type detector (magic bytes) + tests | DONE | Owner ran on 2026-10-29: `npm test` = 5 suites, 42 tests passed (2.8 s); `npm run build` succeeded with no errors; commit 65c9db4 pushed. `npm ls multer` = 2.4.0 (vulnerable, see section 10) |
 | 5A-fix | Upgrade multer to >= 2.5.0 (npm overrides) + re-check audit/tests/build | DONE (owner must commit api/package.json + api/package-lock.json) | Owner ran 2026-10-29: `npm view multer@2.5.0` = 2.5.0 exists; platform-express 11.2.8 pins multer exactly 2.4.0; added `"overrides": {"multer": "2.5.0"}`; `npm ls multer` = 2.5.0 overridden; `npm audit --omit=dev` = 0 vulnerabilities; `npm test` = 42 passed; `npm run build` OK |
-| 5B-1 | DocumentEntity, upload config (env limits, fail-fast), `uploads` Docker volume at /data/uploads | CODE PUSHED, NOT VERIFIED BY OWNER | Claude ran in a scratch copy (Node 22): 6 suites, 48 tests pass, nest build OK. Owner must run: git pull, recreate api container, test, build, `docker compose build api` |
+| 5B-1 | DocumentEntity, upload config (env limits, fail-fast), `uploads` Docker volume at /data/uploads | DONE | Owner ran 2026-10-29: git pull fast-forward 93c3063..77fe5ff; api container recreated, volume docintel_uploads created; `npm test` = 6 suites, 48 tests passed; `npm run build` OK; /data/uploads exists (root, drwxr-xr-x); `docker compose build api` OK (`npm ci` succeeded on node:24-slim) |
 | 5B-2 | Upload endpoint POST /documents (multi-file, multer disk storage, NO async fileFilter, magic-byte check after save, sha256, documents rows, cleanup of rejected files) + tests | TODO | |
 | 6 | BullMQ pipeline (retry, idempotency, status, reprocess) | TODO | |
 | 7 | Digital PDF + OCR | TODO | |
@@ -184,9 +184,11 @@ Current test status: API 42 tests passing in 5 suites (as of Step 5A-fix, run by
 - Free hosting will not handle a 1000-page OCR run; the live demo uses small samples (state in README).
 - Tests must never use real confidential invoices.
 
-- UNVERIFIED: in Claude's sandbox (Node 22, npm 10.9.9) `npm ci` fails with "Missing: webpack@5.112.2 from lock file" (webpack is an optional peer of @nestjs/cli / ts-loader). Probably an npm 10 vs 11 difference (Docker uses node:24-slim). The Dockerfile uses `npm ci`, so `docker compose build api` must be run once to confirm the lock file works for a fresh clone. If it fails, regenerate the lock file with `npm install` inside the container and commit it.
+- RESOLVED 2026-10-29: `npm ci` failed in Claude's sandbox (Node 22, npm 10: "Missing: webpack@5.112.2 from lock file") but succeeds in the project's Docker build (node:24-slim), so it was an npm version difference. Always trust the Docker build for lock file checks.
 - Upload container runs as root (Dockerfile has no USER). Acceptable for local dev; harden in Step 22.
 - multer limits apply to the whole request (fileSize per file, files count). Express body limits do not apply to multipart. Source: expressjs.com multer page, checked 2026-10-29.
 
 ## 14. Next action
-Owner: `git pull`, then verify Step 5B-1 (see section 12): recreate api container, `npm test` (expect 6 suites, 48 tests), `npm run build`, `docker compose build api`, check /data/uploads exists in the container. Then Step 5B-2 (upload endpoint).
+Step 5B-2: upload endpoint POST /documents (multi-file, multer disk storage into UPLOAD_DIR, NO async fileFilter, magic-byte check after save, sha256, documents rows, delete rejected files) with tests.
+
+Note on access: Claude reads/pushes this repo through the GitHub connection of the owner's claude.ai account (not a password in the repo). Commits by Claude so far: 7ec7909, c1d60ab, 77fe5ff, all on main.
