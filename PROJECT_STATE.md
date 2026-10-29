@@ -16,17 +16,17 @@ AI-Powered Document Intelligence System (Senior AI Engineer take-home assignment
 Owner: Sabbir. Location: E:\Projects\docintel (Windows, Docker Desktop; Node is installed on the PC but Docker is used on purpose, see section 11).
 Constraints: 100% free (no paid APIs or tools). Quality over speed; the 5-day deadline is relaxed by the owner (may finish later and use it in a portfolio).
 Extra goal: a live online demo so interviewers can test without installing anything, plus a one-command local run (`docker compose up`).
-Git: repo is pushed to GitHub (private) so work can continue from another AI account.
+Git: repo is on GitHub (private) so work can continue from another AI account. Commit and push after every step.
 
 ## 2. Assignment requirements (source of truth: senior-ai-enginner.pdf)
 Business problem: thousands of invoices/receipts/scanned PDFs/images/Excel/CSV per day (PDFs up to ~1000 pages). Needs extraction, validation, PDF-PDF and PDF-Excel cross verification, search.
 
 | Task | Requirement | Planned step | Status |
 |---|---|---|---|
-| 1 | Accept PDF, JPG, PNG, TIFF, XLSX, XLS, CSV. Text from digital PDFs, OCR for scans/images, parse spreadsheets. Multi-page, multi-sheet, poor quality, corrupted files | 5, 7, 8, 9 | Not started |
+| 1 | Accept PDF, JPG, PNG, TIFF, XLSX, XLS, CSV. Text from digital PDFs, OCR for scans/images, parse spreadsheets. Multi-page, multi-sheet, poor quality, corrupted files | 5, 7, 8, 9 | Step 5 (upload) in progress |
 | 2 | Extract invoice no, date, supplier, customer, subtotal, tax, total, currency, line items as JSON. Never invent missing values | 10, 11 | Not started |
 | 3 | Validation: missing fields, bad numbers, duplicates, subtotal/tax/line-item/total mismatch. Flag for manual review | 12, 13 | Not started |
-| 4 | REST APIs: upload, status, results, search, manual corrections, failed-job reprocess. Background processing | 4, 5, 6, 15 | Step 4B (auth) in progress |
+| 4 | REST APIs: upload, status, results, search, manual corrections, failed-job reprocess. Background processing | 4, 5, 6, 15 | Auth done (Step 4); upload in progress |
 | 5 | DB for metadata, text, structured results, validation errors, history. Keyword filter + semantic search | 3, 14 | Schema done (Step 3); search not started |
 | 6 | React/Next.js UI: upload many, progress, inspect, errors, correct, search | 16-19 | Not started |
 | 7 | Automated tests + labeled dataset evaluation (accuracy, time, success rate, failure rate) | 20, 21 | Not started |
@@ -40,10 +40,11 @@ Business problem: thousands of invoices/receipts/scanned PDFs/images/Excel/CSV p
 | Processor (data plane) | Python 3.12 + FastAPI, internal only | Best OCR/data ecosystem (Tesseract, OpenCV, pandas) |
 | DB | PostgreSQL 17 + pgvector (image pgvector/pgvector:pg17, pgvector 0.8.7 verified) | Relational integrity for invoices; keyword + semantic search in one SQL; one less service than a separate vector DB (Qdrant is the fallback if a literal vector DB is wanted) |
 | Queue | BullMQ on Redis 7 (noeviction + appendonly verified) | Assignment suggests it. Queue payload = document ID only (job data is plain text in Redis) |
-| ORM / migrations | TypeORM 0.3.31 + @nestjs/typeorm 11.0.3 (both pinned exact, verified working) | TypeORM 1.0 exists but was not chosen for now (section 11) |
+| ORM / migrations | TypeORM 0.3.31 + @nestjs/typeorm 11.0.3 (pinned exact, verified working) | TypeORM 1.0 exists but was not chosen for now (section 11) |
 | ioredis | 5.11.1 (pinned exact) | typeorm 0.3.31 needs ioredis ^5; npm had resolved 6.0.0 in Step 1 |
 | Password hashing | Node built-in crypto.scrypt (N=2^17, r=8, p=1), format scrypt$N$r$p$salt$hash (verified working) | No native dependency. Parameters are from memory of OWASP guidance, not verified against current text |
-| Auth (Step 4B, planned) | @nestjs/jwt 11.0.0 (HS256 pinned, custom guards, no passport), @nestjs/throttler 6.5.0, helmet, class-validator, class-transformer | throttler 6.x supports Nest 11 (checked via its package.json); jwt 11.0.0 version taken from npm page, not independently confirmed as latest |
+| Auth | @nestjs/jwt 11.0.0 (HS256 pinned, custom guards, no passport), @nestjs/throttler 6.5.0, helmet 8.3.0, class-validator 0.15.1, class-transformer 0.5.1 (all pinned exact, verified working) | Fewer dependencies than passport; secure-by-default global guard |
+| Uploads (Step 5, planned) | multer via @nestjs/platform-express, disk storage, own magic-byte detector (no file-type library) | Own detector avoids ESM-only package problems in CommonJS Nest; multer version must be patched (section 10) |
 | OCR | Tesseract + OpenCV (inside processor image) | Free, local, no data leaves the machine |
 | Spreadsheets | pandas, openpyxl, xlrd | Standard |
 | LLM | Any OpenAI-compatible API, configured from an admin panel (provider, base URL, model, key, test button, fallback model). Fallback ladder: json_schema, then json_object + Pydantic validation + retry | Free tiers differ in structured-output support; client can switch to a private/paid provider later without code changes |
@@ -81,9 +82,10 @@ docintel/
     src/config/env.ts       requireEnv()
     src/health/             health controller/service/spec (db, redis, processor)
     src/database/           data-source.ts (migration CLI) + migrations/1793232000000-InitialSchema.ts
-    src/users/              user.entity, password.service(+spec), users.service, admin-seed.service, users.module  (Step 4A, DONE)
-    src/auth/               (Step 4B, code given, not yet run) auth.config, auth.types, auth.service, auth.controller, auth.module,
-                            jwt-auth.guard(+spec), roles.guard(+spec), public.decorator, roles.decorator, dto/login.dto
+    src/users/              user.entity, password.service(+spec), users.service, admin-seed.service, users.module   (Step 4A, DONE)
+    src/auth/               auth.config, auth.types, auth.service, auth.controller, auth.module, jwt-auth.guard(+spec),
+                            roles.guard(+spec), public.decorator, roles.decorator, dto/login.dto   (Step 4B, DONE)
+    src/documents/          (Step 5A, code given, not yet run) file-type.detector(+spec)
   processor/                FastAPI
     app/main.py             GET /health
     tests/test_health.py
@@ -92,9 +94,9 @@ docintel/
 ## 6. Environment
 Ports on host: api 4700 (container 4000; host 4000 is blocked by a Windows reserved port range), db 5433, redis 6500 (6380 was blocked). Processor 8001 is NOT published (Docker network only, verified).
 If a port fails after reboot: `netsh interface ipv4 show excludedportrange protocol=tcp`
-Env vars (see .env.example): POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, DATABASE_URL, REDIS_URL, PORT, PROCESSOR_URL, ADMIN_EMAIL, ADMIN_PASSWORD (min 12 chars). Step 4B adds JWT_SECRET (random, 32+ chars, app refuses values starting with "change-me"), JWT_EXPIRES_SECONDS (default 3600), DEMO_USER_EMAIL, DEMO_USER_PASSWORD (min 12 chars), optional CORS_ORIGIN (default http://localhost:3000).
+Env vars (see .env.example): POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, DATABASE_URL, REDIS_URL, PORT, PROCESSOR_URL, ADMIN_EMAIL, ADMIN_PASSWORD (min 12), JWT_SECRET (random, 32+ chars; the app refuses values starting with "change-me"; generate with `docker compose exec api node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`), JWT_EXPIRES_SECONDS (default 3600), DEMO_USER_EMAIL, DEMO_USER_PASSWORD (min 12), optional CORS_ORIGIN (default http://localhost:3000).
 IMPORTANT: `docker compose restart` does NOT reload .env. Use `docker compose up -d --force-recreate api`.
-Seeded accounts (local defaults from .env.example): admin@example.com / demo user demo@example.com. Change passwords for any public demo.
+Seeded accounts (local defaults from .env.example): admin@example.com (admin), demo@example.com (user). Change passwords for any public demo.
 
 ## 7. Database schema
 IMPLEMENTED (Step 3, migration 1793232000000-InitialSchema): users, documents, document_pages, invoices, invoice_line_items, validation_issues, corrections, processing_events, document_chunks + typeorm_migrations. Verified: vector(384) column, HNSW (cosine) index, GIN full-text index, CHECK constraints reject bad values, migrate/revert/re-run works.
@@ -102,9 +104,11 @@ Run: `docker compose exec api npm run migration:run` (revert: `npm run migration
 Design rules: money as numeric(18,4) (never float); duplicate invoices are flagged, not blocked by a unique constraint (index on supplier_name + invoice_number); one document can contain many invoices; queue holds IDs only; events/audit log avoid storing document contents; synchronize is false, migrations are the schema owner. Later: app_settings (LLM config, Step 10). Never edit an applied migration, add a new one.
 
 ## 8. API
-Implemented: GET /health (public; db, redis, processor).
-Step 4B (code given, not yet run): POST /auth/login (public, 5/min/IP), GET /auth/me, GET /auth/admin-ping (admin only, TEMPORARY test route, remove later). Global guards in order: throttler (120/min/IP), JWT guard (secure by default, @Public() opts out), roles guard (@Roles()). helmet, global ValidationPipe (whitelist, forbidNonWhitelisted), CORS locked to CORS_ORIGIN.
-Planned: upload (multi-file), document list/status, extracted results, search (keyword + semantic), manual correction, reprocess failed, admin LLM settings. OpenAPI/Swagger docs at the end. No public registration (users are seeded; admin user management maybe in the UI steps).
+Implemented and verified:
+- GET /health (public): db, redis, processor.
+- POST /auth/login (public, 5/min/IP), GET /auth/me, GET /auth/admin-ping (admin only, TEMPORARY test route, remove later).
+- Global guards in order: throttler (120/min/IP), JWT guard (secure by default; @Public() opts out), roles guard (@Roles()). helmet, global ValidationPipe (whitelist, forbidNonWhitelisted), CORS limited to CORS_ORIGIN.
+Planned: POST /documents (multi-file upload, Step 5B), document list/status, extracted results, search (keyword + semantic), manual correction, reprocess failed, admin LLM settings. OpenAPI/Swagger at the end (helmet CSP may need adjusting for Swagger UI, unverified). No public registration.
 
 ## 9. Commands
 - Start: `docker compose up -d --build`
@@ -114,12 +118,14 @@ Planned: upload (multi-file), document list/status, extracted results, search (k
 - Processor tests: `docker compose exec processor python -m pytest -q`
 - Build: `docker compose exec api npm run build`
 - Migrations: `docker compose exec api npm run migration:run`
-- Logs: `docker compose logs <service> --tail 40`
+- Logs: `docker compose logs <service> --tail 40` (a --force-recreate clears old logs)
 - DB shell: `docker compose exec db psql -U docintel -d docintel`
+- Login test (PowerShell): `$body = @{ email = "admin@example.com"; password = "<ADMIN_PASSWORD>" } | ConvertTo-Json; Invoke-RestMethod -Method Post -Uri http://localhost:4700/auth/login -ContentType "application/json" -Body $body`
 
 ## 10. Security rules
-No secrets in git; validate uploads (magic bytes, size, limits); JWT + roles; AI output is untrusted until validated; queue payload IDs only; processor not exposed; free LLM tiers may send data to third parties, so only synthetic/public documents are used, and this is stated openly in the README; encrypted storage of LLM API keys; audit trail for corrections; npm audit currently reports 10 vulnerabilities (8 low, 2 high), to be reviewed in Step 22.
-Known auth limits (Step 4B design): JWT is stateless, no logout/revocation, short expiry instead; no refresh tokens; rate limit is in-memory per instance per IP (revisit behind a proxy/when scaling); no account lockout; where the frontend stores the token (memory vs cookie) is decided in the UI steps.
+No secrets in git; validate uploads (magic bytes, size, limits); JWT + roles; AI output is untrusted until validated; queue payload IDs only; processor not exposed; free LLM tiers may send data to third parties, so only synthetic/public documents are used, and this is stated openly in the README; encrypted storage of LLM API keys; audit trail for corrections.
+Known auth limits: JWT is stateless, no logout/revocation, short expiry instead; no refresh tokens; rate limit is in-memory per instance per IP (revisit behind a proxy/when scaling); no account lockout; where the frontend stores the token is decided in the UI steps.
+Multer advisories (Express security releases page, plus aggregator pages for 2.1.x): DoS issues fixed in multer 2.0.1, 2.0.2, and aggregator pages list further fixes in 2.1.0 and 2.1.1. The multer version actually installed via @nestjs/platform-express must be checked (`npm ls multer`) and forced to >= 2.1.1 if lower. npm audit currently reports 10 vulnerabilities (8 low, 2 high); contents not yet inspected.
 
 ## 11. Decisions and research log
 - Docker is used on purpose: the system needs Postgres with pgvector, Redis, and Python with Tesseract; Docker makes it reproducible for interviewers (`docker compose up`) and easier to deploy. Not required by the assignment. Trade-off: slower dev loop and Windows quirks (ports, bind mounts).
@@ -128,7 +134,8 @@ Known auth limits (Step 4B design): JWT is stateless, no logout/revocation, shor
 - 2026-10-29: npm resolved ioredis 6 in Step 1, which conflicted with typeorm. Pinned ioredis 5.11.1. Check BullMQ's ioredis requirement before Step 6.
 - 2026-10-29: Windows reserved port ranges blocked host ports 4000 and 6380 after a reboot; changed to 4700 and 6500.
 - 2026-10-29: Password hashing uses built-in scrypt to avoid native build problems (verified working in tests).
-- 2026-10-29: Auth design: custom JWT guard with @nestjs/jwt (no passport), algorithm pinned to HS256 on sign and verify, global guard with @Public() opt-out, expiry as seconds number. @nestjs/throttler 6.5.0 declares Nest 11 support in its package.json.
+- 2026-10-29: Auth design: custom JWT guard with @nestjs/jwt (no passport), HS256 pinned on sign and verify, global guard with @Public() opt-out, expiry as seconds number. @nestjs/throttler 6.5.0 declares Nest 11 support (its package.json). Verified by 20 passing tests and live checks (401/403/400/429).
+- 2026-10-29: Upload design: own magic-byte detector for pdf/jpg/png/tiff/xlsx/xls/csv instead of the file-type library (recent versions are ESM-only, awkward with CommonJS Nest; not independently verified this session). Stored file name = random UUID, never the client name. Detected type must match the file extension. Client MIME type is ignored.
 - Groq/Gemini structured-output differences are the reason for the json_schema -> json_object fallback ladder.
 - Vercel hosts only the Next.js frontend. API, worker, processor, Postgres, Redis need a Docker host (free options not verified; decide in Step 22-23).
 
@@ -138,9 +145,10 @@ Known auth limits (Step 4B design): JWT is stateless, no logout/revocation, shor
 | 1 | Docker infra + NestJS /health | DONE | All TC passed (2026-10-28) |
 | 2 | Python processor + NestJS connection | DONE | All TC passed (2026-10-28) |
 | 3 | DB schema + TypeORM migrations | DONE | All TC passed (2026-10-29) |
-| 4A | TypeORM wiring, User entity, scrypt hashing, admin seed | DONE | All TC passed (2026-10-29): 8 API tests pass, admin row with scrypt hash, no plain password stored, restart keeps 1 user, health 200 |
-| 4B | JWT login, guards, roles, rate limit, helmet, validation | IN PROGRESS | Code given to owner, NOT yet run. Expected after run: 20 API tests passing |
-| 5 | Secure upload API | TODO | |
+| 4A | TypeORM wiring, User entity, scrypt hashing, admin seed | DONE | All TC passed (2026-10-29) |
+| 4B | JWT login, guards, roles, rate limit, helmet, validation | DONE | All TC passed (2026-10-29): 20 API tests, 401 without token, admin-ping 200 for admin and 403 for user, wrong/unknown email both 401, invalid body 400, rate limit returns 429, no X-Powered-By |
+| 5A | Multer version check + file type detector (magic bytes) + tests | IN PROGRESS | Code given, NOT yet run. Expected after run: 42 API tests passing |
+| 5B | Upload endpoint (multi-file, disk storage, shared uploads volume, documents rows) | TODO | |
 | 6 | BullMQ pipeline (retry, idempotency, status, reprocess) | TODO | |
 | 7 | Digital PDF + OCR | TODO | |
 | 8 | Image/TIFF | TODO | |
@@ -157,16 +165,18 @@ Known auth limits (Step 4B design): JWT is stateless, no logout/revocation, shor
 | 22 | Security + performance pass, pin all package versions, auto-run migrations, deployment | TODO | |
 | 23 | README, diagram, schema, prompts, AI disclosure, video | TODO | |
 
-Current test status: API 8 tests passing, processor 1 passing (as of Step 4A).
+Current test status: API 20 tests passing, processor 1 passing (as of Step 4B).
 
 ## 13. Known issues and todo
 - Migrations are NOT run automatically. A fresh clone + `docker compose up` crashes when the API needs the users table. Must be automated before delivery (Step 22/23).
-- After Step 4B, a fresh clone also needs a real JWT_SECRET; provide a setup script or auto-generation (Step 22/23).
+- A fresh clone needs a real JWT_SECRET; provide a setup script or auto-generation (Step 22/23).
 - Remove the temporary GET /auth/admin-ping route once real admin routes exist.
+- multer filenames arrive latin1-decoded (busboy default); decode to UTF-8 in Step 5B (unverified, check with a non-ASCII filename).
+- Detector limits: BigTIFF and UTF-16 CSV are rejected; .xlsm/macros not specially handled (revisit in Step 9). Real file validity is checked by the processor.
 - Python packages unpinned (pin in Step 22). httpx deprecation warning in processor tests (harmless).
 - npm install-scripts warning (@parcel/watcher, unrs-resolver) ignored for now.
 - Free hosting will not handle a 1000-page OCR run; the live demo uses small samples (state in README).
 - Tests must never use real confidential invoices.
 
 ## 14. Next action
-Run Step 4B: install packages (exact versions), add env vars (generate JWT_SECRET), add the auth files and edits, `docker compose up -d --force-recreate api`, run TC1-TC11. Then Step 5 (secure upload API).
+Step 5A: run `npm ls multer` and `npm audit --omit=dev`, send the output; add file-type.detector.ts and its spec; run tests. Then Step 5B (upload endpoint).

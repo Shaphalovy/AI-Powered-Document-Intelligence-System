@@ -13,6 +13,10 @@ export class UsersService {
     return this.repo.findOne({ where: { email: email.trim().toLowerCase() } });
   }
 
+  findById(id: string): Promise<User | null> {
+    return this.repo.findOne({ where: { id } });
+  }
+
   countAdmins(): Promise<number> {
     return this.repo.count({ where: { role: 'admin' } });
   }

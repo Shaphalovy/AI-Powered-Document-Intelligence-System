@@ -12,6 +12,11 @@ export class AdminSeedService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    await this.seedAdmin();
+    await this.seedDemoUser();
+  }
+
+  private async seedAdmin(): Promise<void> {
     const email = process.env.ADMIN_EMAIL;
     const password = process.env.ADMIN_PASSWORD;
 
@@ -29,5 +34,24 @@ export class AdminSeedService implements OnModuleInit {
     const hash = await this.passwords.hash(password);
     await this.users.create(email, hash, 'admin');
     this.logger.log(`Admin user created: ${email}`);
+  }
+
+  private async seedDemoUser(): Promise<void> {
+    const email = process.env.DEMO_USER_EMAIL;
+    const password = process.env.DEMO_USER_PASSWORD;
+
+    if (!email || !password) {
+      return;
+    }
+    if (password.length < 12) {
+      throw new Error('DEMO_USER_PASSWORD must be at least 12 characters');
+    }
+    if (await this.users.findByEmail(email)) {
+      return;
+    }
+
+    const hash = await this.passwords.hash(password);
+    await this.users.create(email, hash, 'user');
+    this.logger.log(`Demo user created: ${email}`);
   }
 }
