@@ -83,8 +83,7 @@ docintel/
 ```
 
 ## 6. Environment
-Ports on host: api 4000, db 5433, redis 6380. Processor 8001 is NOT published (Docker network only, verified).
-Env vars (see .env.example): POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, DATABASE_URL, REDIS_URL, PORT, PROCESSOR_URL.
+Ports on host: api 4700 (4000 is blocked by a Windows reserved port range), db 5433, redis 6500 (6380 was blocked). Processor 8001 is NOT published. If a port fails after reboot: netsh interface ipv4 show excludedportrange protocol=tcp
 
 ## 7. Database schema (planned in Step 3; update when implemented)
 users, documents, document_pages, invoices, invoice_line_items, validation_issues, corrections, processing_events, document_chunks (embedding vector(384) + full-text column). Later: app_settings (LLM config, Step 10).
@@ -96,7 +95,7 @@ Auth (login), upload (multi-file), document list/status, extracted results, sear
 ## 9. Commands
 - Start: `docker compose up -d --build`
 - Status: `docker compose ps`
-- Health: `curl.exe -i http://localhost:4000/health`
+- Health: `curl.exe -i http://localhost:4700/health`
 - API tests: `docker compose exec api npm test`
 - Processor tests: `docker compose exec processor python -m pytest -q`
 - Build: `docker compose exec api npm run build`
