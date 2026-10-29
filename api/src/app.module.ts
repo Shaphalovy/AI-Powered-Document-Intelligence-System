@@ -5,7 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
-import { requireEnv } from './config/env';
+import { typeOrmOptions } from './database/typeorm-options';
 import { DocumentsModule } from './documents/documents.module';
 import { HealthController } from './health/health.controller';
 import { HealthService } from './health/health.service';
@@ -13,12 +13,7 @@ import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      url: requireEnv('DATABASE_URL'),
-      autoLoadEntities: true,
-      synchronize: false,
-    }),
+    TypeOrmModule.forRoot(typeOrmOptions()),
     ThrottlerModule.forRoot([{ ttl: seconds(60), limit: 120 }]),
     UsersModule,
     AuthModule,
