@@ -45,6 +45,10 @@ export class DocumentsController {
         results,
       });
     }
-    return { accepted, rejected: results.length - accepted, results };
+    // "queued" tells the client how many accepted files really went into the queue.
+    const queued = results.filter(
+      (r) => r.status === 'accepted' && r.queued,
+    ).length;
+    return { accepted, rejected: results.length - accepted, queued, results };
   }
 }

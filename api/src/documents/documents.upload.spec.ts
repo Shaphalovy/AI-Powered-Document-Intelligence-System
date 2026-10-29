@@ -6,10 +6,12 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import request from 'supertest';
 import type { AuthenticatedRequest } from '../auth/auth.types';
+import { DocumentQueueService } from '../queue/document-queue.service';
 import { DocumentEntity } from './document.entity';
 import { DocumentsController } from './documents.controller';
 import { DocumentsService } from './documents.service';
 import { INCOMING_DIR_NAME } from './multer.options';
+import { ProcessingEventEntity } from './processing-event.entity';
 import { UPLOAD_CONFIG, type UploadConfig } from './upload.config';
 import { UploadInterceptor } from './upload.interceptor';
 
@@ -21,11 +23,20 @@ const PNG = Buffer.concat([
 const CSV = Buffer.from('invoice_no,total\nINV-1,100.00\n');
 const GARBAGE = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05]);
 
+type Change = { criteria: Record<string, unknown>; changes: Record<string, unknown> };
+
 describe('POST /documents', () => {
   let app: INestApplication;
   let dir: string;
   let saved: DocumentEntity[];
+  let updates: Change[];
+  let events: ProcessingEventEntity[];
+  let enqueued: string[];
+  let enqueueCalls: number;
   let failSave: boolean;
+  let failUpdate: boolean;
+  let failEvent: boolean;
+  let queueError: Error | null;
 
   const config = (): UploadConfig => ({
     dir,
@@ -43,8 +54,16 @@ describe('POST /documents', () => {
   beforeEach(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'docintel-upload-'));
     saved = [];
+    updates = [];
+    events = [];
+    enqueued = [];
+    enqueueCalls = 0;
     failSave = false;
-    const fakeRepo = {
+    failUpdate = false;
+    failEvent = false;
+    queueError = null;
+
+    const fakeDocuments = {
       create: (data: Partial<DocumentEntity>) => data as DocumentEntity,
       save: (entity: DocumentEntity) => {
         if (failSave) {
@@ -53,14 +72,44 @@ describe('POST /documents', () => {
         saved.push(entity);
         return Promise.resolve(entity);
       },
+      update: (criteria: Record<string, unknown>, changes: Record<string, unknown>) => {
+        if (failUpdate) {
+          return Promise.reject(new Error('update failed'));
+        }
+        updates.push({ criteria, changes });
+        return Promise.resolve({ affected: 1 });
+      },
     };
+    const fakeEvents = {
+      create: (data: Partial<ProcessingEventEntity>) => data as ProcessingEventEntity,
+      save: (entity: ProcessingEventEntity) => {
+        if (failEvent) {
+          return Promise.reject(new Error('event write failed'));
+        }
+        events.push(entity);
+        return Promise.resolve(entity);
+      },
+    };
+    const fakeQueue = {
+      enqueue: (documentId: string) => {
+        enqueueCalls += 1;
+        if (queueError) {
+          return Promise.reject(queueError);
+        }
+        enqueued.push(documentId);
+        return Promise.resolve();
+      },
+    };
+
     const moduleRef = await Test.createTestingModule({
       controllers: [DocumentsController],
       providers: [
         DocumentsService,
         UploadInterceptor,
         { provide: UPLOAD_CONFIG, useValue: config() },
-        { provide: getRepositoryToken(DocumentEntity), useValue: fakeRepo },
+        { provide: getRepositoryToken(DocumentEntity), useValue: fakeDocuments },
+        { provide: getRepositoryToken(ProcessingEventEntity), useValue: fakeEvents },
+        { provide: DocumentQueueService, useValue: fakeQueue },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -191,9 +240,10 @@ describe('POST /documents', () => {
   });
 
   it('keeps non-ASCII file names intact', async () => {
-    const res = await post().attach('files', PDF, 'résumé-€.pdf');
+    const name = 'r\u00e9sum\u00e9-\u20ac.pdf';
+    const res = await post().attach('files', PDF, name);
     expect(res.status).toBe(201);
-    expect(saved[0].originalFilename).toBe('résumé-€.pdf');
+    expect(saved[0].originalFilename).toBe(name);
   });
 
   it('removes the stored file and reports an error when the database save fails', async () => {
@@ -204,5 +254,81 @@ describe('POST /documents', () => {
     expect(res.body.results[0].reason).toBe('Internal error while saving the file');
     expect(storedFiles()).toHaveLength(0);
     expect(incomingFiles()).toHaveLength(0);
+    expect(enqueueCalls).toBe(0);
+  });
+
+  it('queues every accepted document, marks it queued and writes an event', async () => {
+    const res = await post()
+      .attach('files', PDF, 'a.pdf')
+      .attach('files', CSV, 'b.csv');
+
+    expect(res.status).toBe(201);
+    expect(res.body.accepted).toBe(2);
+    expect(res.body.queued).toBe(2);
+    expect([...enqueued].sort()).toEqual(saved.map((d) => d.id).sort());
+    expect(updates).toHaveLength(2);
+    expect(updates[0].changes).toEqual({ status: 'queued' });
+    expect(updates[0].criteria).toMatchObject({ status: 'uploaded' });
+    expect(events).toHaveLength(2);
+    expect(events.every((e) => e.stage === 'enqueue' && e.status === 'succeeded')).toBe(true);
+    for (const result of res.body.results) {
+      expect(result.queued).toBe(true);
+      expect(result.documentStatus).toBe('queued');
+    }
+  });
+
+  it('keeps the file and reports queued false when the queue is down, without leaking secrets', async () => {
+    queueError = new Error('Connection is closed. redis://:supersecret@redis:6379');
+    const res = await post().attach('files', PDF, 'a.pdf');
+
+    expect(res.status).toBe(201);
+    expect(res.body.accepted).toBe(1);
+    expect(res.body.queued).toBe(0);
+    expect(res.body.results[0].queued).toBe(false);
+    expect(res.body.results[0].documentStatus).toBe('uploaded');
+    expect(JSON.stringify(res.body)).not.toContain('supersecret');
+    expect(saved).toHaveLength(1);
+    expect(storedFiles()).toHaveLength(1);
+    expect(updates).toHaveLength(0);
+    expect(events).toHaveLength(1);
+    expect(events[0].status).toBe('failed');
+    expect(events[0].message ?? '').not.toContain('supersecret');
+  });
+
+  it('tries the queue only once per request when it is down', async () => {
+    queueError = new Error('ECONNREFUSED');
+    const res = await post()
+      .attach('files', PDF, 'a.pdf')
+      .attach('files', CSV, 'b.csv')
+      .attach('files', PNG, 'c.png');
+
+    expect(res.status).toBe(201);
+    expect(res.body.accepted).toBe(3);
+    expect(res.body.queued).toBe(0);
+    expect(enqueueCalls).toBe(1);
+    expect(events).toHaveLength(3);
+    expect(events.every((e) => e.status === 'failed')).toBe(true);
+    expect(storedFiles()).toHaveLength(3);
+  });
+
+  it('still succeeds when the status update fails after queueing', async () => {
+    failUpdate = true;
+    const res = await post().attach('files', PDF, 'a.pdf');
+
+    expect(res.status).toBe(201);
+    expect(res.body.results[0].queued).toBe(true);
+    expect(res.body.results[0].documentStatus).toBe('uploaded');
+    expect(enqueued).toHaveLength(1);
+    expect(storedFiles()).toHaveLength(1);
+  });
+
+  it('still succeeds when writing the processing event fails', async () => {
+    failEvent = true;
+    const res = await post().attach('files', PDF, 'a.pdf');
+
+    expect(res.status).toBe(201);
+    expect(res.body.results[0].queued).toBe(true);
+    expect(res.body.results[0].documentStatus).toBe('queued');
+    expect(storedFiles()).toHaveLength(1);
   });
 });
