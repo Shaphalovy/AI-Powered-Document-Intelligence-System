@@ -87,7 +87,7 @@ docintel/
                             roles.guard(+spec), public.decorator, roles.decorator, dto/login.dto   (Step 4B, DONE)
     src/documents/          file-type.detector(+spec) (5A, DONE); document.entity, upload.config(+spec) (5B-1, DONE);
                             multer.options, upload.interceptor, upload-filename(+spec), documents.service/controller/module,
-                            documents.upload.spec (5B-2, code pushed, owner must verify)
+                            documents.upload.spec (5B-2, DONE)
   processor/                FastAPI
     app/main.py             GET /health
     tests/test_health.py
@@ -157,7 +157,7 @@ Earlier note: the full `npm audit` (including dev dependencies) reported 10 vuln
 | 5A | Multer version check + file type detector (magic bytes) + tests | DONE | Owner ran on 2026-10-29: `npm test` = 5 suites, 42 tests passed (2.8 s); `npm run build` succeeded with no errors; commit 65c9db4 pushed. `npm ls multer` = 2.4.0 (vulnerable, see section 10) |
 | 5A-fix | Upgrade multer to >= 2.5.0 (npm overrides) + re-check audit/tests/build | DONE (owner must commit api/package.json + api/package-lock.json) | Owner ran 2026-10-29: `npm view multer@2.5.0` = 2.5.0 exists; platform-express 11.2.8 pins multer exactly 2.4.0; added `"overrides": {"multer": "2.5.0"}`; `npm ls multer` = 2.5.0 overridden; `npm audit --omit=dev` = 0 vulnerabilities; `npm test` = 42 passed; `npm run build` OK |
 | 5B-1 | DocumentEntity, upload config (env limits, fail-fast), `uploads` Docker volume at /data/uploads | DONE | Owner ran 2026-10-29: git pull fast-forward 93c3063..77fe5ff; api container recreated, volume docintel_uploads created; `npm test` = 6 suites, 48 tests passed; `npm run build` OK; /data/uploads exists (root, drwxr-xr-x); `docker compose build api` OK (`npm ci` succeeded on node:24-slim) |
-| 5B-2 | Upload endpoint POST /documents (multi-file, multer disk storage, NO async fileFilter, magic-byte check after save, sha256, documents rows, cleanup of rejected files) + tests | CODE PUSHED, NOT VERIFIED BY OWNER | Claude ran in a scratch copy (Node 22, with @types/multer 2.3.0): 8 suites, 64 tests pass, nest build OK. The integration test found and fixed a real bug (temp file left behind on the 401 path). Owner must: git pull, `npm install --save-dev --save-exact @types/multer@2.3.0` in the container, recreate api, test, build, live curl test, commit package.json + lock file |
+| 5B-2 | Upload endpoint POST /documents (multi-file, multer disk storage, NO async fileFilter, magic-byte check after save, sha256, documents rows, cleanup of rejected files) + tests | DONE (owner must commit + push api/package.json and api/package-lock.json for @types/multer) | Owner ran 2026-10-29: git pull 77fe5ff..7ddd93f; `npm install --save-dev --save-exact @types/multer@2.3.0` OK; `npm test` = 8 suites, 64 tests passed; `npm run build` OK; /health 200 (db, redis, processor true); live upload of test.csv + mini.pdf + fake.pdf (CSV renamed .pdf) = 201 accepted 2, rejected 1 with reason "extension does not match ... (detected: csv)"; no token = 401; documents table has 2 rows (status uploaded, stored_path uuid.ext); /data/uploads has the 2 files and incoming/ is empty; rate limit header 30/min seen |
 | 6 | BullMQ pipeline (retry, idempotency, status, reprocess) | TODO | |
 | 7 | Digital PDF + OCR | TODO | |
 | 8 | Image/TIFF | TODO | |
@@ -174,7 +174,7 @@ Earlier note: the full `npm audit` (including dev dependencies) reported 10 vuln
 | 22 | Security + performance pass, pin all package versions, auto-run migrations, deployment | TODO | |
 | 23 | README, diagram, schema, prompts, AI disclosure, video | TODO | |
 
-Current test status: API 42 tests passing in 5 suites (as of Step 5A-fix, run by owner 2026-10-29, after the multer override), processor 1 passing (as of Step 4B, not re-run since). API build passes.
+Current test status: API 64 tests passing in 8 suites (as of Step 5B-2, run by owner 2026-10-29), processor 1 passing (as of Step 4B, not re-run since). API build passes.
 
 ## 13. Known issues and todo
 - Migrations are NOT run automatically. A fresh clone + `docker compose up` crashes when the API needs the users table. Must be automated before delivery (Step 22/23).
@@ -191,10 +191,11 @@ Current test status: API 42 tests passing in 5 suites (as of Step 5A-fix, run by
 - Upload container runs as root (Dockerfile has no USER). Acceptable for local dev; harden in Step 22.
 - multer limits apply to the whole request (fileSize per file, files count). Express body limits do not apply to multipart. Source: expressjs.com multer page, checked 2026-10-29.
 
+- npm audit (full, incl. dev) reports 8 low severity vulnerabilities after installing @types/multer; not inspected yet (production audit `npm audit --omit=dev` was 0 after the multer fix; re-run it after each dependency change). npm warns about install scripts of @parcel/watcher and unrs-resolver (ignored, see above).
 - Known gaps after 5B-2: leftover files in UPLOAD_DIR/incoming after a crash are not cleaned automatically (add a cleanup job, Step 6 or 22); no processing_events row is written on upload yet (Step 6); no sha256 duplicate-file warning yet (Step 14/12); a unit test intentionally logs "database is down" (expected).
 - Test design note: the integration test fakes the JWT guard with a header; the real guard order (guard before multer) is covered by the live curl test in the owner checklist.
 
 ## 14. Next action
-Owner: verify Step 5B-2 (see section 12). Then Step 6: BullMQ pipeline (enqueue document ID after upload, worker, retries, idempotency, status updates, reprocess).
+Owner: `git pull origin main`, then commit and push api/package.json and api/package-lock.json (@types/multer 2.3.0). Then Step 6: BullMQ pipeline (enqueue document ID after upload, worker, retries, idempotency, status updates, processing_events, reprocess). Before Step 6: check BullMQ's ioredis requirement against our pinned ioredis 5.11.1.
 
 Note on access: Claude reads/pushes this repo through the GitHub connection of the owner's claude.ai account (not a password in the repo). Commits by Claude so far: 7ec7909, c1d60ab, 77fe5ff, all on main.
