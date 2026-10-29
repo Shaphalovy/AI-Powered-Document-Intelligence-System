@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { requireEnv } from './config/env';
+import { DocumentsModule } from './documents/documents.module';
 import { HealthController } from './health/health.controller';
 import { HealthService } from './health/health.service';
 import { UsersModule } from './users/users.module';
@@ -21,6 +22,7 @@ import { UsersModule } from './users/users.module';
     ThrottlerModule.forRoot([{ ttl: seconds(60), limit: 120 }]),
     UsersModule,
     AuthModule,
+    DocumentsModule,
   ],
   controllers: [HealthController],
   providers: [

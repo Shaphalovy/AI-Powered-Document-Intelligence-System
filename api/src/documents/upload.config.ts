@@ -1,5 +1,8 @@
 import * as path from 'node:path';
 
+/** Injection token for the validated upload settings. */
+export const UPLOAD_CONFIG = 'UPLOAD_CONFIG';
+
 export interface UploadConfig {
   /** Absolute folder where uploaded files are stored. */
   dir: string;

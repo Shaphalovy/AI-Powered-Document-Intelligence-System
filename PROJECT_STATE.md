@@ -44,7 +44,7 @@ Business problem: thousands of invoices/receipts/scanned PDFs/images/Excel/CSV p
 | ioredis | 5.11.1 (pinned exact) | typeorm 0.3.31 needs ioredis ^5; npm had resolved 6.0.0 in Step 1 |
 | Password hashing | Node built-in crypto.scrypt (N=2^17, r=8, p=1), format scrypt$N$r$p$salt$hash (verified working) | No native dependency. Parameters are from memory of OWASP guidance, not verified against current text |
 | Auth | @nestjs/jwt 11.0.0 (HS256 pinned, custom guards, no passport), @nestjs/throttler 6.5.0, helmet 8.3.0, class-validator 0.15.1, class-transformer 0.5.1 (all pinned exact, verified working) | Fewer dependencies than passport; secure-by-default global guard |
-| Uploads (Step 5, planned) | multer via @nestjs/platform-express, disk storage, own magic-byte detector (no file-type library) | Own detector avoids ESM-only package problems in CommonJS Nest; multer version must be patched (section 10) |
+| Uploads (Step 5) | multer 2.5.0 (forced by npm overrides) via @nestjs/platform-express, disk storage, @types/multer 2.3.0 (dev), own magic-byte detector (no file-type library) | Own detector avoids ESM-only package problems in CommonJS Nest; multer patched (section 10) |
 | OCR | Tesseract + OpenCV (inside processor image) | Free, local, no data leaves the machine |
 | Spreadsheets | pandas, openpyxl, xlrd | Standard |
 | LLM | Any OpenAI-compatible API, configured from an admin panel (provider, base URL, model, key, test button, fallback model). Fallback ladder: json_schema, then json_object + Pydantic validation + retry | Free tiers differ in structured-output support; client can switch to a private/paid provider later without code changes |
@@ -85,7 +85,9 @@ docintel/
     src/users/              user.entity, password.service(+spec), users.service, admin-seed.service, users.module   (Step 4A, DONE)
     src/auth/               auth.config, auth.types, auth.service, auth.controller, auth.module, jwt-auth.guard(+spec),
                             roles.guard(+spec), public.decorator, roles.decorator, dto/login.dto   (Step 4B, DONE)
-    src/documents/          file-type.detector(+spec) (5A, DONE); document.entity, upload.config(+spec) (5B-1, DONE)
+    src/documents/          file-type.detector(+spec) (5A, DONE); document.entity, upload.config(+spec) (5B-1, DONE);
+                            multer.options, upload.interceptor, upload-filename(+spec), documents.service/controller/module,
+                            documents.upload.spec (5B-2, code pushed, owner must verify)
   processor/                FastAPI
     app/main.py             GET /health
     tests/test_health.py
@@ -109,7 +111,8 @@ Implemented and verified:
 - GET /health (public): db, redis, processor.
 - POST /auth/login (public, 5/min/IP), GET /auth/me, GET /auth/admin-ping (admin only, TEMPORARY test route, remove later).
 - Global guards in order: throttler (120/min/IP), JWT guard (secure by default; @Public() opts out), roles guard (@Roles()). helmet, global ValidationPipe (whitelist, forbidNonWhitelisted), CORS limited to CORS_ORIGIN.
-Planned: POST /documents (multi-file upload, Step 5B), document list/status, extracted results, search (keyword + semantic), manual correction, reprocess failed, admin LLM settings. OpenAPI/Swagger at the end (helmet CSP may need adjusting for Swagger UI, unverified). No public registration.
+POST /documents (Step 5B-2, JWT required, 30/min/IP): multipart/form-data, field name `files` (max MAX_FILES_PER_UPLOAD files, each max MAX_UPLOAD_MB, no other text fields). Per file: saved to UPLOAD_DIR/incoming under a random name, content type detected from magic bytes, extension must match, sha256 computed, moved to UPLOAD_DIR/<uuid>.<ext>, documents row inserted (status `uploaded`, stored_path is relative). Response 201 `{accepted, rejected, results[]}` with per-file status accepted/rejected + reason; 422 when no file is accepted; 400 no files / too many files / wrong field name / extra fields; 413 file too large; 401 without token. Rejected and failed files are deleted. Client MIME type and client path are ignored.
+Planned: document list/status, extracted results, search (keyword + semantic), manual correction, reprocess failed, admin LLM settings. OpenAPI/Swagger at the end (helmet CSP may need adjusting for Swagger UI, unverified). No public registration.
 
 ## 9. Commands
 - Start: `docker compose up -d --build`
@@ -154,7 +157,7 @@ Earlier note: the full `npm audit` (including dev dependencies) reported 10 vuln
 | 5A | Multer version check + file type detector (magic bytes) + tests | DONE | Owner ran on 2026-10-29: `npm test` = 5 suites, 42 tests passed (2.8 s); `npm run build` succeeded with no errors; commit 65c9db4 pushed. `npm ls multer` = 2.4.0 (vulnerable, see section 10) |
 | 5A-fix | Upgrade multer to >= 2.5.0 (npm overrides) + re-check audit/tests/build | DONE (owner must commit api/package.json + api/package-lock.json) | Owner ran 2026-10-29: `npm view multer@2.5.0` = 2.5.0 exists; platform-express 11.2.8 pins multer exactly 2.4.0; added `"overrides": {"multer": "2.5.0"}`; `npm ls multer` = 2.5.0 overridden; `npm audit --omit=dev` = 0 vulnerabilities; `npm test` = 42 passed; `npm run build` OK |
 | 5B-1 | DocumentEntity, upload config (env limits, fail-fast), `uploads` Docker volume at /data/uploads | DONE | Owner ran 2026-10-29: git pull fast-forward 93c3063..77fe5ff; api container recreated, volume docintel_uploads created; `npm test` = 6 suites, 48 tests passed; `npm run build` OK; /data/uploads exists (root, drwxr-xr-x); `docker compose build api` OK (`npm ci` succeeded on node:24-slim) |
-| 5B-2 | Upload endpoint POST /documents (multi-file, multer disk storage, NO async fileFilter, magic-byte check after save, sha256, documents rows, cleanup of rejected files) + tests | TODO | |
+| 5B-2 | Upload endpoint POST /documents (multi-file, multer disk storage, NO async fileFilter, magic-byte check after save, sha256, documents rows, cleanup of rejected files) + tests | CODE PUSHED, NOT VERIFIED BY OWNER | Claude ran in a scratch copy (Node 22, with @types/multer 2.3.0): 8 suites, 64 tests pass, nest build OK. The integration test found and fixed a real bug (temp file left behind on the 401 path). Owner must: git pull, `npm install --save-dev --save-exact @types/multer@2.3.0` in the container, recreate api, test, build, live curl test, commit package.json + lock file |
 | 6 | BullMQ pipeline (retry, idempotency, status, reprocess) | TODO | |
 | 7 | Digital PDF + OCR | TODO | |
 | 8 | Image/TIFF | TODO | |
@@ -188,7 +191,10 @@ Current test status: API 42 tests passing in 5 suites (as of Step 5A-fix, run by
 - Upload container runs as root (Dockerfile has no USER). Acceptable for local dev; harden in Step 22.
 - multer limits apply to the whole request (fileSize per file, files count). Express body limits do not apply to multipart. Source: expressjs.com multer page, checked 2026-10-29.
 
+- Known gaps after 5B-2: leftover files in UPLOAD_DIR/incoming after a crash are not cleaned automatically (add a cleanup job, Step 6 or 22); no processing_events row is written on upload yet (Step 6); no sha256 duplicate-file warning yet (Step 14/12); a unit test intentionally logs "database is down" (expected).
+- Test design note: the integration test fakes the JWT guard with a header; the real guard order (guard before multer) is covered by the live curl test in the owner checklist.
+
 ## 14. Next action
-Step 5B-2: upload endpoint POST /documents (multi-file, multer disk storage into UPLOAD_DIR, NO async fileFilter, magic-byte check after save, sha256, documents rows, delete rejected files) with tests.
+Owner: verify Step 5B-2 (see section 12). Then Step 6: BullMQ pipeline (enqueue document ID after upload, worker, retries, idempotency, status updates, reprocess).
 
 Note on access: Claude reads/pushes this repo through the GitHub connection of the owner's claude.ai account (not a password in the repo). Commits by Claude so far: 7ec7909, c1d60ab, 77fe5ff, all on main.
