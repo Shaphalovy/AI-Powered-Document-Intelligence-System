@@ -85,7 +85,7 @@ docintel/
     src/users/              user.entity, password.service(+spec), users.service, admin-seed.service, users.module   (Step 4A, DONE)
     src/auth/               auth.config, auth.types, auth.service, auth.controller, auth.module, jwt-auth.guard(+spec),
                             roles.guard(+spec), public.decorator, roles.decorator, dto/login.dto   (Step 4B, DONE)
-    src/documents/          (Step 5A, DONE) file-type.detector(+spec)
+    src/documents/          file-type.detector(+spec) (5A, DONE); document.entity, upload.config(+spec) (5B-1, code written, owner must verify)
   processor/                FastAPI
     app/main.py             GET /health
     tests/test_health.py
@@ -94,6 +94,7 @@ docintel/
 ## 6. Environment
 Ports on host: api 4700 (container 4000; host 4000 is blocked by a Windows reserved port range), db 5433, redis 6500 (6380 was blocked). Processor 8001 is NOT published (Docker network only, verified).
 If a port fails after reboot: `netsh interface ipv4 show excludedportrange protocol=tcp`
+Optional upload env vars (defaults in code, not required in .env): UPLOAD_DIR (absolute, default /data/uploads), MAX_UPLOAD_MB (default 100, max 500), MAX_FILES_PER_UPLOAD (default 20, max 100). Invalid values stop the app at startup. Uploaded files live in the Docker volume `uploads` mounted at /data/uploads in the api container (processor will mount it read-only in Step 7).
 Env vars (see .env.example): POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, DATABASE_URL, REDIS_URL, PORT, PROCESSOR_URL, ADMIN_EMAIL, ADMIN_PASSWORD (min 12), JWT_SECRET (random, 32+ chars; the app refuses values starting with "change-me"; generate with `docker compose exec api node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`), JWT_EXPIRES_SECONDS (default 3600), DEMO_USER_EMAIL, DEMO_USER_PASSWORD (min 12), optional CORS_ORIGIN (default http://localhost:3000).
 IMPORTANT: `docker compose restart` does NOT reload .env. Use `docker compose up -d --force-recreate api`.
 Seeded accounts (local defaults from .env.example): admin@example.com (admin), demo@example.com (user). Change passwords for any public demo.
@@ -152,7 +153,8 @@ Earlier note: the full `npm audit` (including dev dependencies) reported 10 vuln
 | 4B | JWT login, guards, roles, rate limit, helmet, validation | DONE | All TC passed (2026-10-29): 20 API tests, 401 without token, admin-ping 200 for admin and 403 for user, wrong/unknown email both 401, invalid body 400, rate limit returns 429, no X-Powered-By |
 | 5A | Multer version check + file type detector (magic bytes) + tests | DONE | Owner ran on 2026-10-29: `npm test` = 5 suites, 42 tests passed (2.8 s); `npm run build` succeeded with no errors; commit 65c9db4 pushed. `npm ls multer` = 2.4.0 (vulnerable, see section 10) |
 | 5A-fix | Upgrade multer to >= 2.5.0 (npm overrides) + re-check audit/tests/build | DONE (owner must commit api/package.json + api/package-lock.json) | Owner ran 2026-10-29: `npm view multer@2.5.0` = 2.5.0 exists; platform-express 11.2.8 pins multer exactly 2.4.0; added `"overrides": {"multer": "2.5.0"}`; `npm ls multer` = 2.5.0 overridden; `npm audit --omit=dev` = 0 vulnerabilities; `npm test` = 42 passed; `npm run build` OK |
-| 5B | Upload endpoint (multi-file, disk storage, shared uploads volume, documents rows) | TODO | |
+| 5B-1 | DocumentEntity, upload config (env limits, fail-fast), `uploads` Docker volume at /data/uploads | CODE PUSHED, NOT VERIFIED BY OWNER | Claude ran in a scratch copy (Node 22): 6 suites, 48 tests pass, nest build OK. Owner must run: git pull, recreate api container, test, build, `docker compose build api` |
+| 5B-2 | Upload endpoint POST /documents (multi-file, multer disk storage, NO async fileFilter, magic-byte check after save, sha256, documents rows, cleanup of rejected files) + tests | TODO | |
 | 6 | BullMQ pipeline (retry, idempotency, status, reprocess) | TODO | |
 | 7 | Digital PDF + OCR | TODO | |
 | 8 | Image/TIFF | TODO | |
@@ -182,5 +184,9 @@ Current test status: API 42 tests passing in 5 suites (as of Step 5A-fix, run by
 - Free hosting will not handle a 1000-page OCR run; the live demo uses small samples (state in README).
 - Tests must never use real confidential invoices.
 
+- UNVERIFIED: in Claude's sandbox (Node 22, npm 10.9.9) `npm ci` fails with "Missing: webpack@5.112.2 from lock file" (webpack is an optional peer of @nestjs/cli / ts-loader). Probably an npm 10 vs 11 difference (Docker uses node:24-slim). The Dockerfile uses `npm ci`, so `docker compose build api` must be run once to confirm the lock file works for a fresh clone. If it fails, regenerate the lock file with `npm install` inside the container and commit it.
+- Upload container runs as root (Dockerfile has no USER). Acceptable for local dev; harden in Step 22.
+- multer limits apply to the whole request (fileSize per file, files count). Express body limits do not apply to multipart. Source: expressjs.com multer page, checked 2026-10-29.
+
 ## 14. Next action
-Owner: `git pull`, then commit and push api/package.json and api/package-lock.json (multer override). Then Step 5B (upload endpoint: multi-file, disk storage, NO async fileFilter, magic-byte check after save, random UUID stored name, documents rows).
+Owner: `git pull`, then verify Step 5B-1 (see section 12): recreate api container, `npm test` (expect 6 suites, 48 tests), `npm run build`, `docker compose build api`, check /data/uploads exists in the container. Then Step 5B-2 (upload endpoint).
