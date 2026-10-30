@@ -17,6 +17,13 @@ interface ClaimRow {
   attempts: number;
 }
 
+/**
+ * Statuses a worker may claim. "processing" is included on purpose: BullMQ never gives the same job
+ * (jobId = documentId) to two workers at once, so a document still marked "processing" when its job
+ * arrives was left behind by a crashed worker (stalled job) and must be resumed, not skipped.
+ */
+export const CLAIMABLE_STATUSES = ['uploaded', 'queued', 'processing'] as const;
+
 @Injectable()
 export class TypeOrmDocumentStore implements DocumentStore {
   constructor(
@@ -27,7 +34,7 @@ export class TypeOrmDocumentStore implements DocumentStore {
   ) {}
 
   async claim(documentId: string): Promise<ClaimedDocument | null> {
-    // One atomic statement: only one worker can move the row to "processing".
+    // One atomic statement. The job lock of BullMQ already guarantees one worker per document.
     const result = await this.documents
       .createQueryBuilder()
       .update(DocumentEntity)
@@ -38,7 +45,7 @@ export class TypeOrmDocumentStore implements DocumentStore {
       })
       .where('id = :id AND status IN (:...statuses)', {
         id: documentId,
-        statuses: ['uploaded', 'queued'],
+        statuses: [...CLAIMABLE_STATUSES],
       })
       .returning('id, stored_path, file_type, attempts')
       .execute();

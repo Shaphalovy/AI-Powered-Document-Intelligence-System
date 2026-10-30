@@ -20,7 +20,7 @@ export interface NewProcessingEvent {
 }
 
 export interface DocumentStore {
-  /** Atomically moves a document from uploaded/queued to processing. Returns null when it is not waiting. */
+  /** Atomically moves a document from uploaded/queued/processing to processing. Returns null when it is finished or missing. */
   claim(documentId: string): Promise<ClaimedDocument | null>;
   /** Back to queued with the last error, so the next attempt can claim it again. */
   release(documentId: string, message: string): Promise<void>;

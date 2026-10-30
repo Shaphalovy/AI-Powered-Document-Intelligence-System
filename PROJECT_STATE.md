@@ -1,6 +1,6 @@
 # PROJECT_STATE (handoff document)
 
-Last updated: 2026-10-29. Update this file at the end of every step.
+Last updated: 2026-10-30. Update this file at the end of every step.
 
 ## 0. How to use this file (for any AI assistant or person)
 1. Read this file fully, then the assignment in docs/ (senior-ai-enginner.pdf) and docs/AI_INSTRUCTIONS.md if present.
@@ -12,7 +12,8 @@ Last updated: 2026-10-29. Update this file at the end of every step.
 7. Never put secrets in git. Never send real confidential invoices to any external service (use synthetic or public samples).
 8. Context: this is mainly an interview take-home task for the company CareGuide.
 9. Copy-paste hygiene (learned in Step 6A): code blocks were pasted into the wrong files twice (service code inside a .spec file, a .spec import inside queue.module.ts). After the owner saves a file, ask for `Get-ChildItem` listing (names + sizes) and, if a test or build fails with an odd error, the first lines of the file in question before guessing.
-10. Write access: the GitHub connection of the owner's claude.ai account was READ-ONLY on 2026-10-29 (a push of this file failed with 403 "Resource not accessible by integration"). Claude cannot push; give the owner the full file to save and commit.
+10. Write access: the GitHub connection of the owner's claude.ai account is session-dependent. In the Claude Code session of 2026-10-29/30 Claude could clone and push (commits 7ec7909 ... bba87f2, and the fix below); in another AI session a push failed with 403 "Resource not accessible by integration". Check before relying on it; if a push fails, give the owner the full file to save and commit.
+11. ONE WRITER RULE (agreed 2026-10-30): two AI assistants wrote Step 6 in parallel on 2026-10-29 and their versions overlapped. From now on exactly one assistant writes code and PROJECT_STATE.md per step; the owner pastes only commands and their output. Before starting a step run `git fetch` and read the new commits.
 
 ## 1. Project
 AI-Powered Document Intelligence System (Senior AI Engineer take-home assignment).
@@ -94,6 +95,10 @@ docintel/
                             multer.options, upload.interceptor, upload-filename(+spec), documents.service/controller/module,
                             documents.upload.spec (5B-2, DONE)
     src/queue/              queue.constants.ts, redis-connection.ts(+spec), document-queue.service.ts(+spec), queue.module.ts
+    src/worker.ts           worker entry point (compose runs dist/worker.js)
+    src/worker/             (Step 6C, on branch wip/step6c-local) worker.module, worker.config(+spec), document.worker (BullMQ Worker),
+                            document-processing.service(+spec), document-store + typeorm-document-store(+spec), processor-gateway, processor-client(+spec)
+    src/database/typeorm-options.ts   shared TypeORM settings (API and worker)
                             (Step 6A, DONE; QueueModule is NOT imported by AppModule yet, wiring is Step 6B)
   processor/                FastAPI
     app/main.py             GET /health
@@ -172,9 +177,10 @@ Redis/queue: REDIS_URL may contain a password; parseRedisUrl never puts the URL 
 | 5A-fix | Upgrade multer to >= 2.5.0 (npm overrides) + re-check audit/tests/build | DONE | Owner ran 2026-10-29: `npm view multer@2.5.0` = 2.5.0 exists; platform-express 11.2.8 pins multer exactly 2.4.0; added `"overrides": {"multer": "2.5.0"}`; `npm ls multer` = 2.5.0 overridden; `npm audit --omit=dev` = 0 vulnerabilities; `npm test` = 42 passed; `npm run build` OK. Verified on main: api/package.json contains the override |
 | 5B-1 | DocumentEntity, upload config (env limits, fail-fast), `uploads` Docker volume at /data/uploads | DONE | Owner ran 2026-10-29: git pull fast-forward 93c3063..77fe5ff; api container recreated, volume docintel_uploads created; `npm test` = 6 suites, 48 tests passed; `npm run build` OK; /data/uploads exists (root, drwxr-xr-x); `docker compose build api` OK (`npm ci` succeeded on node:24-slim) |
 | 5B-2 | Upload endpoint POST /documents (multi-file, multer disk storage, NO async fileFilter, magic-byte check after save, sha256, documents rows, cleanup of rejected files) + tests | DONE | Owner ran 2026-10-29: git pull 77fe5ff..7ddd93f; `npm install --save-dev --save-exact @types/multer@2.3.0` OK; `npm test` = 8 suites, 64 tests passed; `npm run build` OK; /health 200 (db, redis, processor true); live upload of test.csv + mini.pdf + fake.pdf (CSV renamed .pdf) = 201 accepted 2, rejected 1 with reason "extension does not match ... (detected: csv)"; no token = 401; documents table has 2 rows (status uploaded, stored_path uuid.ext); /data/uploads has the 2 files and incoming/ is empty; rate limit header 30/min seen. Verified on main (2026-10-29): @types/multer 2.3.0 is committed in api/package.json |
-| 6A | BullMQ 5.81.5 install (pinned), queue module: queue.constants, parseRedisUrl (+7 tests), DocumentQueueService.enqueue with UUID check, jobId = documentId (+3 tests), Queue with attempts 3, exponential backoff 5 s, removeOnComplete/removeOnFail true, maxRetriesPerRequest 1 | DONE (owner must commit + push api/package.json, api/package-lock.json, api/src/queue/*) | Owner ran 2026-10-29: `npm ls ioredis bullmq` = bullmq 5.81.5, ioredis 5.11.1 deduped (single copy, also under typeorm); `npm test` = 10 suites, 74 tests passed (3.2 s); `npm run build` OK (after fixing a wrong import in queue.module.ts); `npm audit --omit=dev` = 0 vulnerabilities. Incident: code was first pasted into the wrong files (service code inside the .spec file, service .ts missing, then queue.module imported from the .spec); fixed by re-creating document-queue.service.ts and correcting the import. NOT tested live yet: real connection to Redis (6B) |
-| 6B | Wire QueueModule into the upload flow: after a document row is saved, enqueue its ID, set status `queued`, write a processing_events row. Decide behavior when enqueue fails (document stays `uploaded` + clear error in the response; to be agreed). Live test incl. stopping Redis | TODO (next) | |
-| 6C | Worker as separate compose service (same image), atomic status claim in DB (only queued -> processing), call to processor (stub until Step 7), attempts/error_message/processing_events, final status, graceful shutdown | TODO | |
+| 6A | BullMQ 5.81.5 install (pinned), queue module: queue.constants, parseRedisUrl (+7 tests), DocumentQueueService.enqueue with UUID check, jobId = documentId (+3 tests), Queue with attempts 3, exponential backoff 5 s, removeOnComplete/removeOnFail true, maxRetriesPerRequest 1 | DONE | Owner ran 2026-10-29: `npm ls ioredis bullmq` = bullmq 5.81.5, ioredis 5.11.1 deduped; `npm test` = 10 suites, 74 tests passed; `npm run build` OK; `npm audit --omit=dev` = 0 vulnerabilities. Pushed as 0e78125. Incident: code was first pasted into the wrong files; fixed |
+| 6B | Wire QueueModule into the upload flow: after a document row is saved, enqueue its ID, set status `queued` (only if still `uploaded`), write a processing_events row (stage `enqueue`). If enqueue fails or takes > 3 s: document stays `uploaded`, response says `queued:false` + `queueError`, later files of the same request skip the queue | DONE | Pushed by owner as 826b573. Verified by Claude 2026-10-30 in a sandbox (Node 22, real Redis 7.0 + Postgres 16 without pgvector): 10 suites, 79 tests pass; build OK; Redis up: status `queued`, event `enqueue/succeeded`, job key in Redis; Redis stopped: response in ~2 s, status `uploaded`, event `enqueue/failed`, `queueError` in the response, file kept, incoming/ empty. NOT yet re-verified by the owner in Docker |
+| 6C | Worker as separate compose service (same image, `node dist/worker.js`), atomic status claim, call to processor POST /process (processor answers 501 until Step 7), attempts/error_message/processing_events, final status, graceful shutdown | CODE ON BRANCH `wip/step6c-local`, NOT MERGED, NOT VERIFIED BY OWNER | Owner pushed the WIP as cda478b (had a build error: worker.ts was in src/worker/ instead of src/). Claude fixed it 2026-10-30 (see next row) and verified in a sandbox with a real processor (FastAPI) + real Redis + Postgres: 14 suites, 104 API tests pass, build OK, processor 4 tests pass; live: upload with no worker -> `queued` (kept in Redis); start worker -> processed, status `failed` with "Processing is not implemented yet" (processor 501, not retried), events started/failed, Redis job removed; processor stopped -> 3 attempts with 5 s + 10 s backoff, events started/retried/started/retried/started/failed, error "The processor is unreachable"; worker kill -9 mid-job -> restart -> BullMQ re-delivers after ~60-80 s (lock 30 s + stalled check 30 s), document resumed as Attempt 2, no skip, finished correctly |
+| 6C-fix | Fix 1: move api/src/worker/worker.ts to api/src/worker.ts (the compose worker runs dist/worker.js; nest build failed with TS2307). Fix 2: claim() now also accepts status `processing` (CLAIMABLE_STATUSES) because a worker crash left the document in `processing` forever and the re-delivered job was skipped (bug found by the kill -9 test). Test added: typeorm-document-store.spec.ts | CODE ON BRANCH, NOT VERIFIED BY OWNER | Sandbox: build OK, 104 tests pass, kill -9 test passes after the fix |
 | 6D | Reprocess service method (failed -> queued, enqueue again), tests; HTTP endpoint comes in Step 15 | TODO | |
 | 7 | Digital PDF + OCR | TODO | |
 | 8 | Image/TIFF | TODO | |
@@ -191,7 +197,7 @@ Redis/queue: REDIS_URL may contain a password; parseRedisUrl never puts the URL 
 | 22 | Security + performance pass, pin all package versions, auto-run migrations, deployment | TODO | |
 | 23 | README, diagram, schema, prompts, AI disclosure, video | TODO | |
 
-Current test status: API 74 tests passing in 10 suites (as of Step 6A, run by owner 2026-10-29), processor 1 passing (as of Step 4B, not re-run since). API build passes.
+Current test status: on `main` (826b573): API 79 tests in 10 suites (Claude sandbox run 2026-10-30; owner-verified count was 74 at Step 6A). On branch wip/step6c-local after the fix: API 104 tests in 14 suites, processor 4 tests (Claude sandbox, 2026-10-30; Redis tests need REDIS_URL). Not yet run by the owner in Docker.
 
 ## 13. Known issues and todo
 - Migrations are NOT run automatically. A fresh clone + `docker compose up` crashes when the API needs the users table. Must be automated before delivery (Step 22/23).
@@ -208,15 +214,20 @@ Current test status: API 74 tests passing in 10 suites (as of Step 6A, run by ow
 - multer limits apply to the whole request (fileSize per file, files count). Express body limits do not apply to multipart. Source: expressjs.com multer page, checked 2026-10-29.
 - npm audit (full, incl. dev) reported 8 low severity vulnerabilities after installing @types/multer; not inspected yet (production audit `npm audit --omit=dev` = 0 after every dependency change so far, including bullmq). Re-run it after each dependency change.
 - Known gaps after 5B-2: leftover files in UPLOAD_DIR/incoming after a crash are not cleaned automatically (add a cleanup job, Step 6 or 22); no sha256 duplicate-file warning yet (Step 14/12); a unit test intentionally logs "database is down" (expected).
-- No processing_events row is written on upload yet (Step 6B).
+- RESOLVED in 6B: processing_events row `enqueue` is written on upload.
 - Test design note: the integration test fakes the JWT guard with a header; the real guard order (guard before multer) is covered by the live curl test in the owner checklist.
 - Editor (VS Code on Windows) may show red squiggles for `import { Queue } from 'bullmq'` because node_modules exists only in the Docker volume; cause not verified (user reported it, exact message not captured). `docker compose exec api npm run build` passes, so it is treated as an editor-only issue. Option if it bothers: `npm ci` inside the host api folder.
 - BullMQ v6 migration is a possible later task (unverified API impact, section 11).
 - docs/AI_INSTRUCTIONS.md is referenced in section 0 but not in the repo; save the project instructions there before delivery (also part of the AI-assistance disclosure).
-- GitHub connection permission is read-only (403 on push, 2026-10-29); Claude cannot update the repo directly.
+- GitHub write access differs per assistant session (see section 0, rule 10).
+- Stalled-job limit (known gap in 6C): BullMQ marks a job failed after it stalls more than maxStalledCount (default 1) times; the job is then removed (removeOnFail) but the document stays `processing`. Needs a sweeper or a `failed` handler (Step 6D or 22). Re-delivery after a worker crash takes about 60-80 s (not tuned).
+- Worker and API both load the typeorm options from src/database/typeorm-options.ts. The worker needs DATABASE_URL, REDIS_URL, PROCESSOR_URL (and optionally PROCESSOR_TIMEOUT_MS default 300000, WORKER_CONCURRENCY default 2, max 10).
+- Compose `worker` service waits for dist/worker.js produced by the api container (`nest start --watch`); after changing worker code run `docker compose restart worker`. Unverified in the owner's Docker until 6C is verified.
+- Sandbox test lesson: never run `pkill -f`/`pgrep -f` with a pattern that also appears in the command line of the same shell command (it kills the shell). Use ports (fuser) or /proc/<pid>/cmdline.
 
 ## 14. Next action
-Owner: replace PROJECT_STATE.md in the repo root with this file, then commit and push together with api/package.json, api/package-lock.json and api/src/queue/ (6 files). Suggested message: "feat(queue): BullMQ 5.81.5 queue module and enqueue service (Step 6A)". If another commit exists on GitHub first, run `git pull origin main` before pushing.
-Then Step 6B: wire QueueModule into DocumentsModule so POST /documents enqueues each accepted document, sets status `queued`, writes a processing_events row; live test including Redis stopped (verifies the provisional maxRetriesPerRequest 1 behavior). Before 6B: read api/src/documents/document.entity.ts and the upload test (documents.upload.spec.ts), and decide the enqueue-failure behavior with the owner.
+1. Owner: switch to branch `wip/step6c-local` (`git checkout wip/step6c-local`, `git pull origin wip/step6c-local`), then in Docker: `docker compose up -d --build`, `npm test` in the api container (expect 14 suites, 104 tests), `npm run build`, check `docker compose ps` shows the worker running, upload a file, check documents + processing_events (expect status `failed`, message "Processing is not implemented yet"). Processor tests: `docker compose exec processor python -m pytest -q` (expect 4 passed).
+2. After the owner confirms: merge `wip/step6c-local` into `main` and mark 6C DONE here.
+3. Then Step 6D: reprocess service method (failed -> queued + enqueue again) and the stalled-job sweeper; then Step 7 (digital PDF text extraction + OCR in the processor, which replaces the 501 stub).
 
-Note on access: earlier commits by Claude (7ec7909, c1d60ab, 77fe5ff) are on main, but the GitHub connection could not write on 2026-10-29 (see section 13).
+Note on access: see section 0 rule 10.
